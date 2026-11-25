@@ -200,6 +200,7 @@ function processMerges(){
     burst(x,y,l); sfx(l);
   }
   pending.length=0;
+  saveGame();
 }
 
 function addScore(n,x,y){
@@ -231,7 +232,7 @@ function reset(data){
   M.Events.on(engine,"collisionActive",onCollide);
   fruits=new Set(); pending=[]; particles=[]; floaters=[];
   now=0; over=false; dangerT=0; cooldown=0; maxLevel=0;
-  bestAtStart=best;
+  bestAtStart=Number.isFinite(data.bestAtStart)?Math.min(best,data.bestAtStart):best;
   score=data.score||0; dropsMade=data.dropsMade||0;
   cur = Number.isInteger(data.cur)?data.cur:randLevel();
   next= Number.isInteger(data.next)?data.next:randLevel();
@@ -240,6 +241,7 @@ function reset(data){
   }
   if(Number.isInteger(data.maxLevel)) maxLevel=Math.max(maxLevel,data.maxLevel);
   overlay.hidden=true;
+  saveGame();
   updateHud();
 }
 
@@ -253,6 +255,7 @@ function drop(){
   M.Body.setAngle(b,(Math.random()-.5)*0.6);
   dropsMade++;
   cur=next; next=randLevel(); cooldown=480;
+  saveGame();
   thud();
   updateHud();
   return true;
@@ -270,6 +273,7 @@ function checkDanger(dt){
 
 function gameOver(){
   over=true;
+  saveGame();
   const newBest = score>0 && score>bestAtStart;
   if(score>best){ best=score; save("best",best); }
   $("ovScore").textContent=score.toLocaleString();
@@ -599,10 +603,33 @@ try{
   }));
 }catch(e){}
 
+/* ---------- auto-save: a game in progress survives a reload ---------- */
+function snapshot(){
+  return {score,cur,next,dropsMade,maxLevel,bestAtStart,
+    fruits:[...fruits].map(b=>({l:b.level,x:b.position.x,y:b.position.y,a:b.angle}))};
+}
+function saveGame(){ save("game", over ? null : snapshot()); }
+function loadGame(){
+  const g=load("game",null);
+  if(!g || typeof g!=="object" || !Array.isArray(g.fruits)) return null;
+  const okL=(v,max)=>Number.isInteger(v)&&v>=0&&v<max;
+  g.fruits=g.fruits.filter(f=>f&&okL(f.l,FR.length)&&Number.isFinite(f.x)&&Number.isFinite(f.y)).slice(0,400);
+  if(!g.fruits.length && !g.score) return null;
+  if(!okL(g.cur,DROP_WEIGHTS.length)) delete g.cur;
+  if(!okL(g.next,DROP_WEIGHTS.length)) delete g.next;
+  if(!okL(g.maxLevel,FR.length)) delete g.maxLevel;
+  g.score=Number.isFinite(g.score)&&g.score>0?Math.floor(g.score):0;
+  g.dropsMade=Number.isFinite(g.dropsMade)&&g.dropsMade>0?Math.floor(g.dropsMade):0;
+  return g;
+}
+document.addEventListener("visibilitychange",()=>{ if(document.hidden) saveGame(); });
+window.addEventListener("pagehide",saveGame);
+setInterval(()=>{ if(!over && fruits.size) saveGame(); },2000);
+
 function start(data){
   setSound(soundOn);
   bestEl.textContent=best.toLocaleString();
-  reset(data && !data.over ? data : null);
+  reset(data && !data.over && Array.isArray(data.fruits) ? data : loadGame());
   resize();
   requestAnimationFrame(t=>{ last=t; frame(t); });
 }
